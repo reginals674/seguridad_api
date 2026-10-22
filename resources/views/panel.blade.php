@@ -56,7 +56,7 @@
 <div class="col">
     <section>
         <h2>Credenciales enviadas en cada petición</h2>
-        <p class="hint">Déjalas vacías mientras la API no tenga seguridad. Se irán usando en cada paso (API key, JWT). Se guardan en este navegador.</p>
+        <p class="hint">Déjalas vacías mientras la API no tenga seguridad. Se irán usando en cada paso (API key, JWT). Se olvidan al cerrar la pestaña.</p>
         <div class="row">
             <div><label for="apiKey">X-API-KEY</label><input id="apiKey" placeholder="(vacío)"></div>
             <div><label for="token">Authorization: Bearer</label><input id="token" placeholder="(vacío)"></div>
@@ -132,9 +132,10 @@ const BASE = window.location.origin;
 document.getElementById('baseUrl').textContent = BASE + '/api';
 
 const $ = (id) => document.getElementById(id);
+// sessionStorage: las credenciales se borran al cerrar la pestaña (localStorage las dejaría en disco para siempre).
 const store = {
-    get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+    get(k) { try { localStorage.removeItem(k); return sessionStorage.getItem(k) || ''; } catch { return ''; } },
+    set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
 };
 ['apiKey', 'token'].forEach((id) => {
     $(id).value = store.get(id);
