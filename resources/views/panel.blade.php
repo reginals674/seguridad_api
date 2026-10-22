@@ -64,13 +64,31 @@
     </section>
 
     <section>
-        <h2>Usuarios <button class="sec small" data-action="loadUsers">Recargar</button></h2>
-        <form id="userForm" class="row">
+        <h2>Sesión (JWT)
+            <span>
+                <button class="sec small" data-action="me">¿Quién soy?</button>
+                <button class="sec small" data-action="refresh">Refrescar token</button>
+                <button class="danger small" data-action="logout">Logout</button>
+            </span>
+        </h2>
+        <p class="hint">Login y registro guardan el token en el campo "Authorization: Bearer" automáticamente.</p>
+        <form id="loginForm" class="row">
+            <div><label>Email</label><input name="email" type="email" required></div>
+            <div><label>Contraseña</label><input name="password" type="password" required></div>
+            <div style="flex:0 0 auto;align-self:end"><button>Login</button></div>
+        </form>
+        <form id="registerForm" class="row">
             <div><label>Nombre</label><input name="name" required></div>
             <div><label>Email</label><input name="email" type="email" required></div>
             <div><label>Contraseña</label><input name="password" type="password" required></div>
-            <div style="flex:0 0 auto;align-self:end"><button>Crear</button></div>
+            <div style="flex:0 0 auto;align-self:end"><button class="sec">Registrar</button></div>
         </form>
+        <div id="sessionInfo" class="hint" style="margin:6px 0 0">Sin token.</div>
+        <pre id="jwtPayload" class="hint" style="margin:6px 0 0;white-space:pre-wrap;word-break:break-all" hidden></pre>
+    </section>
+
+    <section>
+        <h2>Usuarios <button class="sec small" data-action="loadUsers">Recargar</button></h2>
         <div class="table-wrap">
             <table><thead><tr><th>ID</th><th>Nombre</th><th>Email</th><th></th></tr></thead><tbody id="users"></tbody></table>
         </div>
@@ -139,8 +157,35 @@ const store = {
 };
 ['apiKey', 'token'].forEach((id) => {
     $(id).value = store.get(id);
-    $(id).addEventListener('input', () => store.set(id, $(id).value.trim()));
+    $(id).addEventListener('input', () => { store.set(id, $(id).value.trim()); if (id === 'token') showToken(); });
 });
+
+function setToken(token) {
+    $('token').value = token || '';
+    store.set('token', token || '');
+    showToken();
+}
+
+// Decodifica el payload del JWT (la parte del medio). Se puede leer sin la clave: no está cifrado, solo firmado.
+function showToken() {
+    const token = $('token').value.trim();
+    const info = $('sessionInfo');
+    const pre = $('jwtPayload');
+    if (!token) { info.textContent = 'Sin token.'; pre.hidden = true; return; }
+    try {
+        const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(b64.padEnd(b64.length + (4 - b64.length % 4) % 4, '=')));
+        const exp = payload.exp ? new Date(payload.exp * 1000) : null;
+        const vencido = exp && exp < new Date();
+        info.textContent = `Token de usuario #${payload.sub}` + (exp ? ` · caduca ${exp.toLocaleTimeString()}${vencido ? ' (VENCIDO)' : ''}` : '');
+        pre.textContent = 'Payload: ' + JSON.stringify(payload, null, 2);
+        pre.hidden = false;
+    } catch {
+        info.textContent = 'El token no tiene formato JWT.';
+        pre.hidden = true;
+    }
+}
+showToken();
 
 function headers(hasBody) {
     const h = { Accept: 'application/json' };
@@ -264,11 +309,32 @@ function formData(form) {
     return data;
 }
 
-$('userForm').addEventListener('submit', async (e) => {
+$('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const { ok } = await api('POST', '/api/users', formData(e.target));
-    if (ok) { e.target.reset(); loadUsers(); }
+    const { ok, data } = await api('POST', '/api/login', formData(e.target));
+    if (ok) { setToken(data.token); e.target.reset(); loadUsers(); loadTareas(); }
 });
+
+$('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { ok, data } = await api('POST', '/api/register', formData(e.target));
+    if (ok) { setToken(data.token); e.target.reset(); loadUsers(); loadTareas(); }
+});
+
+async function me() { await api('GET', '/api/me'); }
+
+async function refresh() {
+    const { ok, data } = await api('POST', '/api/refresh');
+    if (ok) setToken(data.token);
+}
+
+async function logout() {
+    await api('POST', '/api/logout');
+    // Se borra solo del panel. Si guardaste una copia del token, prueba a usarla: la API la rechaza (lista negra).
+    setToken('');
+    loadUsers();
+    loadTareas();
+}
 
 $('tareaForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -302,7 +368,7 @@ $('burstForm').addEventListener('submit', async (e) => {
 });
 
 document.querySelectorAll('[data-action]').forEach((b) => {
-    const fn = { loadUsers, loadTareas, clearLog: () => { $('log').innerHTML = '<p class="muted">Registro limpio.</p>'; } }[b.dataset.action];
+    const fn = { loadUsers, loadTareas, me, refresh, logout, clearLog: () => { $('log').innerHTML = '<p class="muted">Registro limpio.</p>'; } }[b.dataset.action];
     b.addEventListener('click', fn);
 });
 

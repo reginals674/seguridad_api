@@ -10,10 +10,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable
+class User extends Authenticatable implements JWTSubject
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
@@ -34,5 +35,23 @@ class User extends Authenticatable
     public function tareas(): HasMany
     {
         return $this->hasMany(Tarea::class);
+    }
+
+    /**
+     * Lo que va en el claim "sub" del JWT: el id del usuario.
+     */
+    public function getJWTIdentifier(): mixed
+    {
+        return $this->getKey();
+    }
+
+    /**
+     * Datos extra dentro del token. El payload no está cifrado: nunca poner secretos aquí.
+     *
+     * @return array<string, mixed>
+     */
+    public function getJWTCustomClaims(): array
+    {
+        return [];
     }
 }
