@@ -97,13 +97,31 @@
     <section>
         <h2>Tareas <button class="sec small" data-action="loadTareas">Recargar</button></h2>
         <form id="tareaForm" class="row">
-            <div style="flex:0 1 90px"><label>user_id</label><input name="user_id" type="number" required></div>
+            <div style="flex:0 1 110px"><label>user_id (solo admin)</label><input name="user_id" type="number" placeholder="el mío"></div>
             <div><label>Título</label><input name="titulo" required></div>
             <div><label>Descripción</label><input name="descripcion"></div>
             <div style="flex:0 0 auto;align-self:end"><button>Crear</button></div>
         </form>
         <div class="table-wrap">
             <table><thead><tr><th>ID</th><th>user_id</th><th>Título</th><th></th></tr></thead><tbody id="tareas"></tbody></table>
+        </div>
+    </section>
+
+    <section>
+        <h2>Ataques BOLA / IDOR</h2>
+        <p class="hint">Entra como un usuario normal y apunta a un ID que NO es tuyo. Esperado: 404 en recursos ajenos (igual que si no existieran) y 403 en acciones solo de admin.</p>
+        <div class="row">
+            <div style="flex:0 1 120px"><label for="victimaId">ID objetivo</label><input id="victimaId" type="number" value="1"></div>
+        </div>
+        <div class="row" style="gap:6px">
+            <button class="sec small" data-attack="verTarea">Ver tarea #ID</button>
+            <button class="sec small" data-attack="editarTarea">Editar tarea #ID</button>
+            <button class="danger small" data-attack="borrarTarea">Borrar tarea #ID</button>
+            <button class="sec small" data-attack="crearParaOtro">Crear tarea con user_id=ID</button>
+            <button class="sec small" data-attack="verUsuario">Ver usuario #ID</button>
+            <button class="sec small" data-attack="editarUsuario">Cambiar nombre de usuario #ID</button>
+            <button class="sec small" data-attack="listarUsuarios">Listar todos los usuarios</button>
+            <button class="sec small" data-attack="hacermeAdmin">Hacerme admin</button>
         </div>
     </section>
 
@@ -180,6 +198,10 @@ function showToken() {
         info.textContent = `Token de usuario #${payload.sub}` + (exp ? ` · caduca ${exp.toLocaleTimeString()}${vencido ? ' (VENCIDO)' : ''}` : '');
         pre.textContent = 'Payload: ' + JSON.stringify(payload, null, 2);
         pre.hidden = false;
+        // El rol no va en el token: se pregunta a la API (que lo lee de MySQL en cada petición).
+        api('GET', '/api/me', undefined, { log: false }).then(({ ok, data }) => {
+            if (ok && $('token').value.trim() === token) info.textContent += ` · ${data.name} (${data.role})`;
+        });
     } catch {
         info.textContent = 'El token no tiene formato JWT.';
         pre.hidden = true;
@@ -281,8 +303,8 @@ async function loadUsers() {
     });
 }
 
-async function loadTareas() {
-    const { ok, data } = await api('GET', '/api/tareas');
+async function loadTareas({ log = true } = {}) {
+    const { ok, data } = await api('GET', '/api/tareas', undefined, { log });
     const tbody = $('tareas');
     tbody.innerHTML = '';
     if (!ok || !Array.isArray(data)) return emptyRow(tbody, 4, 'No se pudo cargar (mira el registro).');
@@ -339,7 +361,7 @@ async function logout() {
 $('tareaForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = formData(e.target);
-    data.user_id = Number(data.user_id);
+    if (data.user_id) data.user_id = Number(data.user_id);
     const { ok } = await api('POST', '/api/tareas', data);
     if (ok) { e.target.reset(); loadTareas(); }
 });
@@ -365,6 +387,27 @@ $('burstForm').addEventListener('submit', async (e) => {
     results.forEach((r) => { counts[r.status || 'ERR'] = (counts[r.status || 'ERR'] || 0) + 1; });
     out.textContent = `${n} peticiones → ` + Object.entries(counts).map(([s, c]) => `${s}: ${c}`).join(' · ');
     addLog(method, `${path}  ×${n}`, undefined, results[results.length - 1].status, counts, 0);
+});
+
+const ataques = {
+    verTarea: (id) => api('GET', `/api/tareas/${id}`),
+    editarTarea: (id) => api('PATCH', `/api/tareas/${id}`, { titulo: 'HACKEADO' }),
+    borrarTarea: (id) => api('DELETE', `/api/tareas/${id}`),
+    crearParaOtro: (id) => api('POST', '/api/tareas', { user_id: id, titulo: 'Creada a nombre de otro' }),
+    verUsuario: (id) => api('GET', `/api/users/${id}`),
+    editarUsuario: (id) => api('PATCH', `/api/users/${id}`, { name: 'HACKEADO' }),
+    listarUsuarios: () => api('GET', '/api/users'),
+    hacermeAdmin: async () => {
+        const { ok, data } = await api('GET', '/api/me', undefined, { log: false });
+        if (ok) await api('PATCH', `/api/users/${data.id}`, { role: 'admin' });
+    },
+};
+document.querySelectorAll('[data-attack]').forEach((b) => {
+    b.addEventListener('click', async () => {
+        await ataques[b.dataset.attack](Number($('victimaId').value));
+        // Recarga la tabla sin registrarla: así en el registro solo queda la respuesta del ataque.
+        loadTareas({ log: false });
+    });
 });
 
 document.querySelectorAll('[data-action]').forEach((b) => {

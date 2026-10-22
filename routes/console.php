@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ApiKey;
+use App\Models\User;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 
@@ -40,6 +41,19 @@ Artisan::command('apikey:listar', function () {
         ApiKey::all()->map(fn (ApiKey $k) => [$k->id, $k->nombre, $k->ultimo_uso_at ?? '-', $k->revocada_at ?? 'no']),
     );
 })->purpose('Lista las API keys');
+
+Artisan::command('usuario:rol {email} {rol}', function (string $email, string $rol) {
+    if (! in_array($rol, User::ROLES, true)) {
+        $this->error('Rol inválido. Usa: '.implode(', ', User::ROLES));
+
+        return 1;
+    }
+
+    $user = User::where('email', $email)->firstOrFail();
+    $user->forceFill(['role' => $rol])->save();
+
+    $this->info("{$user->name} ({$email}) ahora es \"{$rol}\".");
+})->purpose('Cambia el rol de un usuario (user / admin)');
 
 Artisan::command('apikey:revocar {id}', function (int $id) {
     $apiKey = ApiKey::findOrFail($id);

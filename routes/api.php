@@ -12,7 +12,7 @@ Route::middleware('api.key')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
 
     // El resto exige además "Authorization: Bearer <token>".
-    // Todavía no se comprueba de quién es cada recurso: eso es el paso de BOLA/roles.
+    // Paso 3 - BOLA/IDOR: qué recurso puede tocar cada usuario lo deciden las Policies (app/Policies).
     Route::middleware('auth:api')->group(function () {
         Route::get('me', [AuthController::class, 'me']);
         Route::post('logout', [AuthController::class, 'logout']);
