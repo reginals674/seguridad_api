@@ -142,13 +142,18 @@
     </section>
 
     <section>
-        <h2>Ráfaga de peticiones</h2>
-        <p class="hint">Manda muchas peticiones seguidas y cuenta los códigos de respuesta (para probar el rate limiter).</p>
+        <h2>Rate Limiter</h2>
+        <p class="hint">Uso general: 60 peticiones/minuto por usuario (o por IP sin token). Login/registro: 5 intentos/minuto por email y 20 por IP. Al pasarte: 429.</p>
         <form id="burstForm" class="row">
             <div style="flex:0 0 110px"><label>Método</label><select name="method"><option>GET</option><option>POST</option></select></div>
             <div><label>Ruta</label><input name="path" value="/api/tareas"></div>
-            <div style="flex:0 0 90px"><label>Cantidad</label><input name="count" type="number" value="20" min="1" max="500"></div>
-            <div style="flex:0 0 auto;align-self:end"><button>Lanzar</button></div>
+            <div style="flex:0 0 90px"><label>Cantidad</label><input name="count" type="number" value="70" min="1" max="500"></div>
+            <div style="flex:0 0 auto;align-self:end"><button>Ráfaga</button></div>
+        </form>
+        <form id="bruteForm" class="row">
+            <div><label>Email víctima</label><input name="email" type="email" value="ana@test.com" required></div>
+            <div style="flex:0 0 90px"><label>Intentos</label><input name="count" type="number" value="10" min="1" max="100"></div>
+            <div style="flex:0 0 auto;align-self:end"><button class="danger">Fuerza bruta login</button></div>
         </form>
         <div id="burstResult" class="muted"></div>
     </section>
@@ -175,7 +180,9 @@ const store = {
 };
 ['apiKey', 'token'].forEach((id) => {
     $(id).value = store.get(id);
-    $(id).addEventListener('input', () => { store.set(id, $(id).value.trim()); if (id === 'token') showToken(); });
+    $(id).addEventListener('input', () => store.set(id, $(id).value.trim()));
+    // "change" (al salir del campo o pegar y confirmar), no "input": una consulta a /api/me por tecla gastaría el rate limit.
+    if (id === 'token') $(id).addEventListener('change', showToken);
 });
 
 function setToken(token) {
@@ -219,7 +226,7 @@ function headers(hasBody) {
 
 async function api(method, path, body, { log = true } = {}) {
     const started = performance.now();
-    let status = 0, data = null, text = '';
+    let status = 0, data = null, text = '', limite = null;
     try {
         const res = await fetch(BASE + path, {
             method,
@@ -227,16 +234,21 @@ async function api(method, path, body, { log = true } = {}) {
             body: body !== undefined ? JSON.stringify(body) : undefined,
         });
         status = res.status;
+        // Cabeceras del Rate Limiter: cuántas peticiones quedan en este minuto y cuánto esperar si te pasaste.
+        if (res.headers.has('X-RateLimit-Limit')) {
+            limite = `quedan ${res.headers.get('X-RateLimit-Remaining')}/${res.headers.get('X-RateLimit-Limit')}`;
+            if (res.headers.has('Retry-After')) limite += ` · esperar ${res.headers.get('Retry-After')} s`;
+        }
         text = await res.text();
         try { data = text ? JSON.parse(text) : null; } catch { data = text; }
     } catch (e) {
         data = 'Error de red: ' + e.message;
     }
-    if (log) addLog(method, path, body, status, data, Math.round(performance.now() - started));
-    return { status, data, ok: status >= 200 && status < 300 };
+    if (log) addLog(method, path, body, status, data, Math.round(performance.now() - started), limite);
+    return { status, data, ok: status >= 200 && status < 300, limite };
 }
 
-function addLog(method, path, body, status, data, ms) {
+function addLog(method, path, body, status, data, ms, limite) {
     const log = $('log');
     if (log.querySelector('p.muted')) log.innerHTML = '';
     const el = document.createElement('div');
@@ -248,7 +260,7 @@ function addLog(method, path, body, status, data, ms) {
     const time = document.createElement('span');
     time.className = 'muted';
     time.style.marginLeft = 'auto';
-    time.textContent = `${ms} ms · ${new Date().toLocaleTimeString()}`;
+    time.textContent = (limite ? limite + ' · ' : '') + `${ms} ms · ${new Date().toLocaleTimeString()}`;
     head.append(time);
     el.append(head);
     if (body !== undefined) {
@@ -386,7 +398,24 @@ $('burstForm').addEventListener('submit', async (e) => {
     const counts = {};
     results.forEach((r) => { counts[r.status || 'ERR'] = (counts[r.status || 'ERR'] || 0) + 1; });
     out.textContent = `${n} peticiones → ` + Object.entries(counts).map(([s, c]) => `${s}: ${c}`).join(' · ');
-    addLog(method, `${path}  ×${n}`, undefined, results[results.length - 1].status, counts, 0);
+    const ultima = results[results.length - 1];
+    addLog(method, `${path}  ×${n}`, undefined, ultima.status, counts, 0, ultima.limite);
+});
+
+// Simula a un atacante probando contraseñas una tras otra contra la misma cuenta.
+$('bruteForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { email, count } = Object.fromEntries(new FormData(e.target));
+    const n = Math.min(Math.max(Number(count) || 1, 1), 100);
+    const out = $('burstResult');
+    const linea = [];
+    let ultima;
+    for (let i = 1; i <= n; i++) {
+        ultima = await api('POST', '/api/login', { email, password: `intento${i}` }, { log: false });
+        linea.push(`#${i}:${ultima.status}`);
+        out.textContent = `Fuerza bruta contra ${email} → ` + linea.join(' ');
+    }
+    addLog('POST', `/api/login  ×${n} (contraseñas falsas)`, undefined, ultima.status, linea.join(' '), 0, ultima.limite);
 });
 
 const ataques = {
